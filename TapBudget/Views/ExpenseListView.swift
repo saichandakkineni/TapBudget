@@ -70,7 +70,7 @@ struct ExpenseRow: View {
             
             Spacer()
             
-            Text(expense.amount, format: .currency(code: "USD"))
+            Text("$\(expense.amount, format: .currency(code: ""))")
                 .fontWeight(.semibold)
         }
     }

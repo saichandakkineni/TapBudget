@@ -20,7 +20,7 @@ struct MonthlySummaryCard: View {
             Text("This Month")
                 .font(.headline)
             
-            Text(monthlyTotal, format: .currency(code: "USD"))
+            Text("$\(monthlyTotal, format: .currency(code: ""))")
                 .font(.system(size: 36, weight: .bold))
             
             HStack {

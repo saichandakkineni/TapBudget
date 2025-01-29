@@ -75,7 +75,7 @@ struct ExportView: View {
         expenses.forEach { expense in
             let date = dateFormatter.string(from: expense.date)
             let category = expense.category?.name ?? "Uncategorized"
-            let amount = String(format: "%.2f", expense.amount)
+            let amount = "$" + String(format: "%.2f", expense.amount)
             let notes = expense.notes?.replacingOccurrences(of: ",", with: ";") ?? ""
             
             csv += "\(date),\(category),\(amount),\(notes)\n"

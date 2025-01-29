@@ -119,7 +119,7 @@ struct BudgetProgressView: View {
                     .foregroundColor(Color(hex: category.color ?? "#FF0000"))
                 Text(category.name ?? "Unnamed Category")
                 Spacer()
-                Text(totalSpent, format: .currency(code: "USD"))
+                Text("$\(totalSpent, format: .currency(code: ""))")
                     .fontWeight(.semibold)
             }
             

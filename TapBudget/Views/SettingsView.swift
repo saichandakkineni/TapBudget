@@ -54,7 +54,7 @@ struct CategoryRow: View {
             
             VStack(alignment: .leading) {
                 Text(category.name ?? "Unnamed Category")
-                Text("Budget: \(category.budget, format: .currency(code: "USD"))")
+                Text("Budget: $\(category.budget, format: .currency(code: ""))")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -83,6 +83,7 @@ struct CategoryFormView: View {
     @State private var icon = "tag"
     @State private var budget = 0.0
     @State private var color = "#FF0000"
+    @FocusState private var budgetFieldIsFocused: Bool
     
     private let icons = ["tag", "cart", "fork.knife", "car", "house", "film", "gamecontroller", "gift", "medical", "airplane"]
     private let colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEEAD", "#D4A5A5", "#9B6B6B", "#A2D5F2", "#07689F", "#40514E"]
@@ -138,8 +139,12 @@ struct CategoryFormView: View {
                 }
                 
                 Section("Budget") {
-                    TextField("Monthly Budget", value: $budget, format: .currency(code: "USD"))
-                        .keyboardType(.decimalPad)
+                    HStack {
+                        Text("$")
+                        TextField("Monthly Budget", value: $budget, format: .currency(code: ""))
+                            .keyboardType(.decimalPad)
+                            .focused($budgetFieldIsFocused)
+                    }
                 }
             }
             .navigationTitle(navigationTitle)
@@ -156,6 +161,11 @@ struct CategoryFormView: View {
                         dismiss()
                     }
                 }
+                ToolbarItem(placement: .keyboard) {
+                    Button("Done") {
+                        budgetFieldIsFocused = false
+                    }
+                }
             }
             .onAppear {
                 if case .edit(let category) = mode {
@@ -169,15 +179,17 @@ struct CategoryFormView: View {
     }
     
     private func saveCategory() {
+        let finalBudget = max(0, budget)
+        
         switch mode {
         case .add:
-            let category = Category(name: name, icon: icon, budget: budget, color: color)
+            let category = Category(name: name, icon: icon, budget: finalBudget, color: color)
             modelContext.insert(category)
             
         case .edit(let category):
             category.name = name
             category.icon = icon
-            category.budget = budget
+            category.budget = finalBudget
             category.color = color
         }
     }

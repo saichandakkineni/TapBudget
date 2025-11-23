@@ -9,7 +9,21 @@ struct HomeView: View {
     @State private var selectedCategory: Category?
     @State private var showingAlert = false
     @State private var alertMessage = ""
+    @State private var showingSuccess = false
+    @State private var successMessage = ""
+    @State private var isSaving = false
     @FocusState private var amountFieldIsFocused: Bool
+    
+    private var canSave: Bool {
+        selectedCategory != nil && 
+        !selectedAmount.isEmpty && 
+        Double(selectedAmount) != nil &&
+        !isSaving
+    }
+    
+    private var expenseViewModel: ExpenseViewModel {
+        ExpenseViewModel(modelContext: modelContext)
+    }
     
     private let numberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -40,14 +54,22 @@ struct HomeView: View {
                         }
                         
                         // Category grid
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 15) {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible()), count: AppConstants.categoryGridColumns),
+                            spacing: AppConstants.categoryGridSpacing
+                        ) {
                             ForEach(categories) { category in
                                 CategoryButton(
                                     category: category,
                                     isSelected: selectedCategory?.id == category.id,
                                     action: { 
-                                        selectedCategory = category
-                                        // Optionally dismiss keyboard when category is selected
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+                                            selectedCategory = category
+                                        }
+                                        // Haptic feedback for selection
+                                        let generator = UISelectionFeedbackGenerator()
+                                        generator.selectionChanged()
+                                        // Dismiss keyboard when category is selected
                                         amountFieldIsFocused = false
                                     }
                                 )
@@ -56,18 +78,25 @@ struct HomeView: View {
                         
                         // Save button
                         Button(action: saveQuickExpense) {
-                            Text("Save Expense")
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.accentColor)
-                                .foregroundColor(.white)
-                                .cornerRadius(10)
+                            HStack {
+                                if isSaving {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                }
+                                Text(isSaving ? "Saving..." : "Save Expense")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(canSave ? Color.accentColor : Color.gray.opacity(0.5))
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
                         }
+                        .disabled(!canSave)
                     }
                     .padding()
                     .background(Color(.systemBackground))
-                    .cornerRadius(15)
-                    .shadow(radius: 2)
+                    .cornerRadius(AppConstants.cardCornerRadius)
+                    .shadow(radius: AppConstants.cardShadowRadius)
                 }
                 .padding()
             }
@@ -84,24 +113,65 @@ struct HomeView: View {
             } message: {
                 Text(alertMessage)
             }
+            .toast(isPresented: $showingSuccess, message: successMessage, icon: "checkmark.circle.fill")
         }
     }
     
     private func saveQuickExpense() {
-        guard let category = selectedCategory,
-              let amount = Double(selectedAmount),
-              amount > 0 else {
-            alertMessage = "Please enter a valid amount and select a category"
+        guard let category = selectedCategory else {
+            alertMessage = "Please select a category"
             showingAlert = true
             return
         }
         
-        let viewModel = ExpenseViewModel(modelContext: modelContext)
-        viewModel.addExpense(amount: amount, category: category)
+        guard let amount = Double(selectedAmount) else {
+            alertMessage = "Please enter a valid amount"
+            showingAlert = true
+            return
+        }
         
-        // Reset form
-        selectedAmount = ""
-        selectedCategory = nil
+        // Comprehensive validation
+        let validation = DataValidator.validateExpense(amount: amount, category: category, notes: nil)
+        if case .invalid(let message) = validation {
+            alertMessage = message
+            showingAlert = true
+            return
+        }
+        
+        isSaving = true
+        
+        Task {
+            do {
+                try expenseViewModel.addExpense(amount: amount, category: category)
+                
+                await MainActor.run {
+                    // Show success feedback with toast
+                    successMessage = "\(amount.formattedAsCurrency()) added to \(category.name)"
+                    showingSuccess = true
+                    
+                    // Haptic feedback
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                    
+                    // Reset form after a brief delay
+                    Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                        await MainActor.run {
+                            selectedAmount = ""
+                            selectedCategory = nil
+                            amountFieldIsFocused = false
+                            isSaving = false
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = error.localizedDescription
+                    showingAlert = true
+                    isSaving = false
+                }
+            }
+        }
     }
 }
 
@@ -112,14 +182,17 @@ struct CategoryButton: View {
     
     var body: some View {
         Button(action: action) {
-            VStack {
+            VStack(spacing: 6) {
                 Image(systemName: category.icon)
                     .font(.title2)
+                    .symbolEffect(.bounce, value: isSelected)
                 Text(category.name)
                     .font(.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .padding(.vertical, AppConstants.categoryButtonVerticalPadding)
             .background(
                 isSelected ? 
                     Color(hex: category.color).opacity(0.2) : 
@@ -130,7 +203,14 @@ struct CategoryButton: View {
                     Color(hex: category.color) : 
                     .primary
             )
-            .cornerRadius(10)
+            .cornerRadius(AppConstants.cardCornerRadius)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppConstants.cardCornerRadius)
+                    .stroke(isSelected ? Color(hex: category.color) : Color.clear, lineWidth: 2)
+            )
+            .scaleEffect(isSelected ? 1.05 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isSelected)
         }
+        .buttonStyle(.plain)
     }
 } 

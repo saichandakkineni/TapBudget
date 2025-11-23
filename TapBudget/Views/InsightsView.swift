@@ -31,17 +31,27 @@ struct InsightsView: View {
                         Chart(categorySpending) { spending in
                             SectorMark(
                                 angle: .value("Amount", spending.amount),
-                                innerRadius: .ratio(0.618),
-                                angularInset: 1.5
+                                innerRadius: .ratio(AppConstants.pieChartInnerRadius),
+                                angularInset: AppConstants.pieChartAngularInset
                             )
                             .foregroundStyle(Color(hex: spending.category.color ?? "#FF0000"))
                         }
                     }
                     
                     // Budget progress
-                    VStack(spacing: 15) {
-                        ForEach(categories) { category in
-                            BudgetProgressView(category: category, expenses: expenses)
+                    if categories.isEmpty {
+                        EmptyStateView(
+                            icon: "chart.bar.doc.horizontal",
+                            title: "No Categories",
+                            message: "Create categories in Settings to track your budget progress.",
+                            actionTitle: nil,
+                            action: nil
+                        )
+                    } else {
+                        VStack(spacing: 15) {
+                            ForEach(categories) { category in
+                                BudgetProgressView(category: category, expenses: expenses)
+                            }
                         }
                     }
                 }
@@ -52,17 +62,24 @@ struct InsightsView: View {
     }
     
     private var monthlySpending: [MonthlySpending] {
-        // Calculate monthly totals for the last 6 months
+        // Calculate monthly totals for the last N months
         let calendar = Calendar.current
         let endDate = Date()
-        let startDate = calendar.date(byAdding: .month, value: -5, to: endDate)!
+        let monthsToShow = AppConstants.monthlySpendingMonthsToShow
+        guard let startDate = calendar.date(byAdding: .month, value: -(monthsToShow - 1), to: endDate) else {
+            return []
+        }
         
         return calendar.generateDates(
             inside: DateInterval(start: startDate, end: endDate),
             matching: DateComponents(day: 1)
         ).map { date in
-            let monthExpenses = expenses.filter {
-                calendar.isDate($0.date, equalTo: date, toGranularity: .month)
+            guard let monthRange = DateFilterHelper.monthRange(for: date) else {
+                return MonthlySpending(month: date, amount: 0)
+            }
+            
+            let monthExpenses = expenses.filter { expense in
+                expense.date >= monthRange.start && expense.date < monthRange.end
             }
             return MonthlySpending(
                 month: date,
@@ -72,9 +89,12 @@ struct InsightsView: View {
     }
     
     private var categorySpending: [CategorySpending] {
-        categories.map { category in
-            let amount = expenses.filter { $0.category?.id == category.id }
-                .reduce(0) { $0 + $1.amount }
+        // Optimize by grouping expenses by category first
+        let expensesByCategory = Dictionary(grouping: expenses) { $0.category?.id ?? "" }
+        
+        return categories.map { category in
+            let categoryExpenses = expensesByCategory[category.id] ?? []
+            let amount = categoryExpenses.reduce(0) { $0 + $1.amount }
             return CategorySpending(category: category, amount: amount)
         }
     }
@@ -90,12 +110,12 @@ struct ChartCard<Content: View>: View {
                 .font(.headline)
             
             content()
-                .frame(height: 200)
+                .frame(height: AppConstants.chartHeight)
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(15)
-        .shadow(radius: 2)
+        .cornerRadius(AppConstants.cardCornerRadius)
+        .shadow(radius: AppConstants.cardShadowRadius)
     }
 }
 
@@ -112,20 +132,57 @@ struct BudgetProgressView: View {
         category.budget > 0 ? min(totalSpent / category.budget, 1.0) : 0
     }
     
+    private var percentage: Int {
+        category.budget > 0 ? Int((totalSpent / category.budget) * 100) : 0
+    }
+    
+    private var remainingBudget: Double {
+        max(0, category.budget - totalSpent)
+    }
+    
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: category.icon ?? "questionmark.circle")
                     .foregroundColor(Color(hex: category.color ?? "#FF0000"))
                 Text(category.name ?? "Unnamed Category")
                 Spacer()
-                Text("$\(totalSpent, format: .currency(code: ""))")
-                    .fontWeight(.semibold)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(totalSpent.formattedAsCurrency())
+                        .fontWeight(.semibold)
+                    if category.budget > 0 {
+                        Text("\(percentage)%")
+                            .font(.caption2)
+                            .foregroundColor(percentage >= 90 ? .red : percentage >= 75 ? .orange : .secondary)
+                    }
+                }
             }
             
-            ProgressView(value: progress)
-                .tint(Color(hex: category.color ?? "#FF0000"))
+            if category.budget > 0 {
+                ProgressView(value: progress)
+                    .tint(Color(hex: category.color ?? "#FF0000"))
+                
+                HStack {
+                    Text("Remaining: \(remainingBudget.formattedAsCurrency())")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    if remainingBudget < category.budget * 0.1 {
+                        Text("⚠️ Low budget")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                    }
+                }
+            } else {
+                Text("No budget set")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(AppConstants.cardCornerRadius)
+        .shadow(radius: AppConstants.cardShadowRadius)
     }
 }
 

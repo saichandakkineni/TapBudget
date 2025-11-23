@@ -7,6 +7,9 @@ struct ExportView: View {
     @State private var exportFormat: ExportFormat = .csv
     @State private var showingShareSheet = false
     @State private var exportedFileURL: URL?
+    @State private var showingError = false
+    @State private var errorMessage = ""
+    @State private var isExporting = false
     
     enum ExportFormat: String, CaseIterable {
         case csv = "CSV"
@@ -25,8 +28,22 @@ struct ExportView: View {
                 }
                 
                 Section {
-                    Button("Export") {
-                        exportData()
+                    Button(action: exportData) {
+                        HStack {
+                            if isExporting {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                            }
+                            Text(isExporting ? "Exporting..." : "Export")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .disabled(isExporting || expenses.isEmpty)
+                    
+                    if expenses.isEmpty {
+                        Text("No expenses to export")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -42,29 +59,60 @@ struct ExportView: View {
                     ShareSheet(items: [url])
                 }
             })
+            .alert("Export Error", isPresented: $showingError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
         }
     }
     
     private func exportData() {
-        let fileName = "expenses_\(Date().formatted(date: .numeric, time: .omitted))"
-        let fileManager = FileManager.default
-        let tempDirectory = fileManager.temporaryDirectory
-        
-        switch exportFormat {
-        case .csv:
-            let csvString = generateCSV()
-            let fileURL = tempDirectory.appendingPathComponent("\(fileName).csv")
-            try? csvString.write(to: fileURL, atomically: true, encoding: .utf8)
-            exportedFileURL = fileURL
-            
-        case .pdf:
-            let pdfData = generatePDF()
-            let fileURL = tempDirectory.appendingPathComponent("\(fileName).pdf")
-            try? pdfData.write(to: fileURL)
-            exportedFileURL = fileURL
+        guard !expenses.isEmpty else {
+            errorMessage = "No expenses to export"
+            showingError = true
+            return
         }
         
-        showingShareSheet = true
+        isExporting = true
+        
+        Task {
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyy-MM-dd"
+            let fileName = "expenses_\(dateFormatter.string(from: Date()))"
+            let fileManager = FileManager.default
+            let tempDirectory = fileManager.temporaryDirectory
+            
+            do {
+                switch exportFormat {
+                case .csv:
+                    let csvString = generateCSV()
+                    let fileURL = tempDirectory.appendingPathComponent("\(fileName).csv")
+                    try csvString.write(to: fileURL, atomically: true, encoding: .utf8)
+                    await MainActor.run {
+                        exportedFileURL = fileURL
+                        showingShareSheet = true
+                        isExporting = false
+                    }
+                    
+                case .pdf:
+                    let pdfData = generatePDF()
+                    let fileURL = tempDirectory.appendingPathComponent("\(fileName).pdf")
+                    try pdfData.write(to: fileURL)
+                    await MainActor.run {
+                        exportedFileURL = fileURL
+                        showingShareSheet = true
+                        isExporting = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to export expenses: \(error.localizedDescription)"
+                    showingError = true
+                    isExporting = false
+                }
+            }
+        }
     }
     
     private func generateCSV() -> String {
@@ -75,7 +123,7 @@ struct ExportView: View {
         expenses.forEach { expense in
             let date = dateFormatter.string(from: expense.date)
             let category = expense.category?.name ?? "Uncategorized"
-            let amount = "$" + String(format: "%.2f", expense.amount)
+            let amount = expense.amount.formattedAsCurrency()
             let notes = expense.notes?.replacingOccurrences(of: ",", with: ";") ?? ""
             
             csv += "\(date),\(category),\(amount),\(notes)\n"
@@ -85,9 +133,7 @@ struct ExportView: View {
     }
     
     private func generatePDF() -> Data {
-        // Implementation for PDF generation
-        // This would require additional setup with PDFKit or other PDF generation libraries
-        return Data()
+        return PDFGenerator.generatePDF(from: expenses)
     }
 }
 

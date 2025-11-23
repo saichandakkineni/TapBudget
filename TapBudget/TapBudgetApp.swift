@@ -27,13 +27,9 @@ struct TapBudgetApp: App {
                 let existingCategories = try context.fetch(categoryFetch)
                 
                 if existingCategories.isEmpty {
-                    let defaultCategories = [
-                        Category(name: "Food", icon: "fork.knife", budget: 500, color: "#FF6B6B"),
-                        Category(name: "Bills", icon: "doc.text", budget: 1000, color: "#4ECDC4"),
-                        Category(name: "Shopping", icon: "cart", budget: 300, color: "#45B7D1"),
-                        Category(name: "Transport", icon: "car", budget: 200, color: "#96CEB4"),
-                        Category(name: "Entertainment", icon: "film", budget: 150, color: "#FFEEAD")
-                    ]
+                    let defaultCategories = AppConstants.defaultCategories.map {
+                        Category(name: $0.name, icon: $0.icon, budget: $0.budget, color: $0.color)
+                    }
                     defaultCategories.forEach { context.insert($0) }
                     try context.save()
                 }
@@ -49,6 +45,10 @@ struct TapBudgetApp: App {
         WindowGroup {
             ContentView()
                 .environment(\.modelContext, modelContainer.mainContext)
+                .task {
+                    // Request notification permissions on app launch
+                    _ = await NotificationManager.shared.requestAuthorization()
+                }
         }
         .modelContainer(modelContainer)
     }

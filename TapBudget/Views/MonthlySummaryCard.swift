@@ -5,33 +5,49 @@ struct MonthlySummaryCard: View {
     @Query private var expenses: [Expense]
     
     private var monthlyTotal: Double {
-        let currentMonth = Calendar.current.component(.month, from: Date())
-        let currentYear = Calendar.current.component(.year, from: Date())
+        guard let monthRange = DateFilterHelper.currentMonthRange() else {
+            return 0
+        }
         
         return expenses.filter { expense in
-            let expenseMonth = Calendar.current.component(.month, from: expense.date)
-            let expenseYear = Calendar.current.component(.year, from: expense.date)
-            return expenseMonth == currentMonth && expenseYear == currentYear
+            expense.date >= monthRange.start && expense.date < monthRange.end
         }.reduce(0) { $0 + $1.amount }
     }
     
+    private var expenseCount: Int {
+        guard let monthRange = DateFilterHelper.currentMonthRange() else {
+            return 0
+        }
+        
+        return expenses.filter { expense in
+            expense.date >= monthRange.start && expense.date < monthRange.end
+        }.count
+    }
+    
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("This Month")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("This Month")
+                    .font(.headline)
+                Spacer()
+                Text(Date(), format: .dateTime.month(.wide))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
             
-            Text("$\(monthlyTotal, format: .currency(code: ""))")
+            Text(monthlyTotal.formattedAsCurrency())
                 .font(.system(size: 36, weight: .bold))
             
             HStack {
-                Spacer()
-                Text(Date(), format: .dateTime.month(.wide))
+                Label("\(expenseCount) expense\(expenseCount == 1 ? "" : "s")", systemImage: "list.bullet")
+                    .font(.caption)
                     .foregroundColor(.secondary)
+                Spacer()
             }
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(15)
-        .shadow(radius: 2)
+        .cornerRadius(AppConstants.cardCornerRadius)
+        .shadow(radius: AppConstants.cardShadowRadius)
     }
 } 

@@ -4,8 +4,23 @@ import SwiftData
 struct HomeView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var categories: [Category]
+    // Optimize: Only fetch expenses from last 6 months for budget calculations
+    // This reduces memory usage while still providing enough data for budget alerts
     @Query private var expenses: [Expense]
     @Query(filter: #Predicate<ExpenseTemplate> { $0.isActive == true }) private var templates: [ExpenseTemplate]
+    
+    // Initialize query with date predicate for recent expenses only
+    init() {
+        // Fetch expenses from last 6 months (sufficient for budget calculations)
+        let sixMonthsAgo = Calendar.current.date(byAdding: .month, value: -6, to: Date()) ?? Date()
+        _expenses = Query(
+            filter: #Predicate<Expense> { expense in
+                expense.date >= sixMonthsAgo
+            },
+            sort: \Expense.date,
+            order: .reverse
+        )
+    }
     @State private var showingQuickEntry = false
     @State private var selectedAmount = ""
     @State private var selectedCategory: Category?
@@ -54,6 +69,9 @@ struct HomeView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(spacing: 20) {
+                        // iCloud Sync Banner (shown if user skipped onboarding and CloudKit is available)
+                        CloudKitSyncBanner()
+                        
                         // Monthly summary card
                         MonthlySummaryCard()
                         

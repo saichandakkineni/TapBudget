@@ -17,6 +17,11 @@ struct SettingsView: View {
                 }
                 
                 Section("Settings") {
+                    // iCloud Sync Toggle (only show if CloudKit is available)
+                    if CloudKitAvailability.isAvailable {
+                        CloudKitSyncToggleView()
+                    }
+                    
                     NavigationLink(destination: CurrencySettingsView()) {
                         HStack {
                             Image(systemName: "dollarsign.circle")

@@ -10,6 +10,9 @@ struct ContentView: View {
     @State private var showOnboarding = !UserDefaults.hasCompletedOnboarding
     @State private var isInitialLoad = true
     
+    // Global sync notification manager
+    @State private var syncNotificationManager = CloudKitSyncNotificationManager.shared
+    
     // Simplified: Use simple query without complex date calculations in init()
     // Date filtering can be done in computed properties if needed
     @Query(sort: \Expense.date, order: .reverse) private var allExpenses: [Expense]
@@ -82,8 +85,21 @@ struct ContentView: View {
         } message: {
             Text(siriResultMessage)
         }
+        .alert(
+            syncNotificationManager.syncAlertIsError ? "Sync Error" : "Sync Successful",
+            isPresented: $syncNotificationManager.showingSyncAlert
+        ) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(syncNotificationManager.syncAlertMessage)
+        }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView(isPresented: $showOnboarding)
+        }
+        .onChange(of: UserDefaults.hasCompletedOnboarding) { _, newValue in
+            // Update showOnboarding state when UserDefaults changes
+            showOnboarding = !newValue
+            print("📱 ContentView: Onboarding completion changed to \(newValue)")
         }
     }
     

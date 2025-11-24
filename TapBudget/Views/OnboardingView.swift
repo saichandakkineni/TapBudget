@@ -4,39 +4,66 @@ import SwiftUI
 struct OnboardingView: View {
     @Binding var isPresented: Bool
     @State private var currentPage: Int = 0
+    @State private var enableCloudKit: Bool = false
     
-    private let pages: [OnboardingPage] = [
-        OnboardingPage(
-            title: "Welcome to TapBudget",
-            description: "Track your expenses effortlessly. No spreadsheets, no complexity.",
-            imageName: "dollarsign.circle.fill",
-            color: .blue
-        ),
-        OnboardingPage(
-            title: "Quick Expense Entry",
-            description: "Tap a category, enter an amount, and you're done. It's that simple.",
-            imageName: "plus.circle.fill",
-            color: .green
-        ),
-        OnboardingPage(
-            title: "Smart Budget Tracking",
-            description: "Set budgets for each category and get alerts when you're approaching limits.",
-            imageName: "chart.pie.fill",
-            color: .orange
-        ),
-        OnboardingPage(
-            title: "Visual Insights",
-            description: "See your spending patterns with beautiful charts and monthly summaries.",
-            imageName: "chart.bar.fill",
-            color: .purple
-        ),
-        OnboardingPage(
-            title: "Export & Share",
-            description: "Export your expenses to CSV or PDF whenever you need them.",
-            imageName: "square.and.arrow.up.fill",
-            color: .red
+    // Initialize pages once - check CloudKit availability at initialization
+    private let pages: [OnboardingPage] = {
+        var allPages: [OnboardingPage] = [
+            OnboardingPage(
+                title: "Welcome to TapBudget",
+                description: "Track your expenses effortlessly. No spreadsheets, no complexity.",
+                imageName: "dollarsign.circle.fill",
+                color: .blue
+            ),
+            OnboardingPage(
+                title: "Quick Expense Entry",
+                description: "Tap a category, enter an amount, and you're done. It's that simple.",
+                imageName: "plus.circle.fill",
+                color: .green
+            ),
+            OnboardingPage(
+                title: "Smart Budget Tracking",
+                description: "Set budgets for each category and get alerts when you're approaching limits.",
+                imageName: "chart.pie.fill",
+                color: .orange
+            ),
+            OnboardingPage(
+                title: "Visual Insights",
+                description: "See your spending patterns with beautiful charts and monthly summaries.",
+                imageName: "chart.bar.fill",
+                color: .purple
+            )
+        ]
+        
+        // Add iCloud sync page if CloudKit is available
+        if CloudKitAvailability.isAvailable {
+            allPages.append(
+                OnboardingPage(
+                    title: "iCloud Sync",
+                    description: "Enable iCloud sync to access your expenses across all your devices. Your data stays private and secure.",
+                    imageName: "icloud.fill",
+                    color: .cyan,
+                    isCloudKitPage: true
+                )
+            )
+        }
+        
+        allPages.append(
+            OnboardingPage(
+                title: "Export & Share",
+                description: "Export your expenses to CSV or PDF whenever you need them.",
+                imageName: "square.and.arrow.up.fill",
+                color: .red
+            )
         )
-    ]
+        
+        return allPages
+    }()
+    
+    // Check if CloudKit page exists
+    private var hasCloudKitPage: Bool {
+        pages.contains { $0.isCloudKitPage }
+    }
     
     var body: some View {
         ZStack {
@@ -56,6 +83,7 @@ struct OnboardingView: View {
                 HStack {
                     Spacer()
                     Button("Skip") {
+                        print("⏭️ User clicked Skip button - completing onboarding")
                         completeOnboarding()
                     }
                     .padding()
@@ -68,8 +96,13 @@ struct OnboardingView: View {
                     set: { currentPage = min($0, max(0, pages.count - 1)) }
                 )) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                        OnboardingPageView(page: page)
-                            .tag(index)
+                        if page.isCloudKitPage {
+                            CloudKitOptInPageView(enableCloudKit: $enableCloudKit)
+                                .tag(index)
+                        } else {
+                            OnboardingPageView(page: page)
+                                .tag(index)
+                        }
                     }
                 }
                 .tabViewStyle(.page)
@@ -109,7 +142,26 @@ struct OnboardingView: View {
     }
     
     private func completeOnboarding() {
+        print("✅ Completing onboarding...")
+        
+        // Save CloudKit preference if user made a choice
+        if hasCloudKitPage {
+            CloudKitPreferenceManager.shared.isCloudKitEnabled = enableCloudKit
+            print("📱 CloudKit sync preference saved: \(enableCloudKit ? "Enabled" : "Disabled")")
+        } else {
+            // If CloudKit page wasn't shown, ensure preference is set to false (default)
+            print("📱 CloudKit page not shown - keeping default (disabled)")
+        }
+        
+        // Set onboarding as completed
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        UserDefaults.standard.synchronize()
+        
+        print("✅ Onboarding marked as complete. hasCompletedOnboarding: \(UserDefaults.hasCompletedOnboarding)")
+        
+        // Post notification so other views can react
+        NotificationCenter.default.post(name: NSNotification.Name("OnboardingCompleted"), object: nil)
+        
         withAnimation {
             isPresented = false
         }
@@ -122,6 +174,7 @@ struct OnboardingPage {
     let description: String
     let imageName: String
     let color: Color
+    var isCloudKitPage: Bool = false
 }
 
 /// View for a single onboarding page

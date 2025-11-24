@@ -17,6 +17,15 @@ struct TapBudgetApp: App {
         // CRITICAL: Robust ModelContainer initialization with multiple fallback strategies
         // This ensures the app ALWAYS launches, even if there are schema issues
         
+        // Check if user has opted in to CloudKit sync
+        let shouldEnableCloudKit = CloudKitPreferenceManager.shared.shouldEnableCloudKit
+        print("🔵 CloudKit Sync: \(shouldEnableCloudKit ? "ENABLED" : "DISABLED")")
+        if shouldEnableCloudKit {
+            print("   User has opted in AND CloudKit is available")
+        } else {
+            print("   Using local-only storage (CloudKit disabled or unavailable)")
+        }
+        
         var container: ModelContainer?
         var lastError: Error?
         
@@ -31,10 +40,19 @@ struct TapBudgetApp: App {
                 SharedBudget.self
             ])
             
+            // Conditionally enable CloudKit based on user preference
+            // cloudKitDatabase must be set during initialization (it's a let constant)
             let configuration = ModelConfiguration(
                 schema: schema,
-                isStoredInMemoryOnly: false
+                isStoredInMemoryOnly: false,
+                cloudKitDatabase: shouldEnableCloudKit ? .automatic : .none
             )
+            
+            if shouldEnableCloudKit {
+                print("   ✅ CloudKit database enabled in ModelConfiguration")
+            } else {
+                print("   ℹ️ Using local-only storage (no CloudKit)")
+            }
             
             container = try ModelContainer(
                 for: Category.self, Expense.self, RecurringExpense.self, ExpenseTemplate.self, BudgetPeriod.self, SharedBudget.self,
@@ -45,7 +63,39 @@ struct TapBudgetApp: App {
             lastError = error
             print("WARNING: Normal initialization failed: \(error.localizedDescription)")
             
-            // Strategy 2: Delete old database and retry
+            // If CloudKit was enabled and failed, try again without CloudKit
+            if shouldEnableCloudKit {
+                print("⚠️ CloudKit initialization failed, retrying with local-only storage...")
+                do {
+                    let schema = Schema([
+                        Category.self,
+                        Expense.self,
+                        RecurringExpense.self,
+                        ExpenseTemplate.self,
+                        BudgetPeriod.self,
+                        SharedBudget.self
+                    ])
+                    
+                    let localOnlyConfig = ModelConfiguration(
+                        schema: schema,
+                        isStoredInMemoryOnly: false
+                    )
+                    // Explicitly disable CloudKit for fallback
+                    
+                    container = try ModelContainer(
+                        for: Category.self, Expense.self, RecurringExpense.self, ExpenseTemplate.self, BudgetPeriod.self, SharedBudget.self,
+                        configurations: localOnlyConfig
+                    )
+                    print("SUCCESS: ModelContainer initialized with local-only storage (CloudKit fallback)")
+                    // Disable CloudKit preference since it failed
+                    CloudKitPreferenceManager.shared.isCloudKitEnabled = false
+                } catch {
+                    // Continue to Strategy 2 (database reset)
+                    lastError = error
+                }
+            }
+            
+            // Strategy 2: Delete old database and retry (local-only, no CloudKit)
             do {
                 print("Attempting to reset database...")
                 let fileManager = FileManager.default
@@ -66,7 +116,7 @@ struct TapBudgetApp: App {
                 
                 print("Deleted old database files")
                 
-                // Retry with fresh database
+                // Retry with fresh database (local-only for fallback)
                 let schema = Schema([
                     Category.self,
                     Expense.self,
@@ -77,11 +127,12 @@ struct TapBudgetApp: App {
                 ])
                 
                 let freshConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+                // Don't enable CloudKit in fallback strategies - use local-only
                 container = try ModelContainer(
                     for: Category.self, Expense.self, RecurringExpense.self, ExpenseTemplate.self, BudgetPeriod.self, SharedBudget.self,
                     configurations: freshConfig
                 )
-                print("SUCCESS: Database reset and recreated")
+                print("SUCCESS: Database reset and recreated (local-only)")
             } catch {
                 lastError = error
                 print("WARNING: Database reset failed: \(error.localizedDescription)")
@@ -218,6 +269,37 @@ struct TapBudgetApp: App {
                             expenses: expenses
                         )
                     }
+                }
+            }
+        }
+        
+        // Trigger CloudKit sync on app launch if CloudKit is enabled
+        if CloudKitPreferenceManager.shared.shouldEnableCloudKit {
+            Task.detached(priority: .utility) {
+                // Wait a bit for app to fully launch
+                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                
+                do {
+                    // Trigger CloudKit sync
+                    try await CloudKitSyncManager.shared.triggerSwiftDataCloudKitSync(
+                        modelContext: await MainActor.run { modelContainer.mainContext }
+                    )
+                    
+                    // Wait for sync to complete
+                    _ = await CloudKitSyncManager.shared.waitForCloudKitSync(
+                        modelContext: await MainActor.run { modelContainer.mainContext },
+                        timeoutSeconds: 30
+                    )
+                    
+                    // Post notification to refresh views
+                    await MainActor.run {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("CloudKitSyncCompleted"),
+                            object: nil
+                        )
+                    }
+                } catch {
+                    print("Error triggering CloudKit sync on launch: \(error.localizedDescription)")
                 }
             }
         }

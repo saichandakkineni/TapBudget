@@ -3,8 +3,21 @@ import SwiftData
 
 struct ExpenseListView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
-    @Query private var categories: [Category]
+    @State private var queryVersion = 0 // Force query refresh by changing this
+    
+    // Dynamic queries that re-evaluate when queryVersion changes
+    private var expenses: [Expense] {
+        let descriptor = FetchDescriptor<Expense>(
+            sortBy: [SortDescriptor(\Expense.date, order: .reverse)]
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+    
+    private var categories: [Category] {
+        let descriptor = FetchDescriptor<Category>()
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+    
     @State private var showingExportSheet = false
     @State private var expenseToDelete: Expense?
     @State private var showingDeleteConfirmation = false
@@ -16,6 +29,11 @@ struct ExpenseListView: View {
     @State private var startDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
     @State private var isFilteringByDate = false
+    
+    // Pagination state
+    @State private var displayedExpenseCount: Int = 50 // Initial batch size
+    private let paginationBatchSize: Int = 50 // Load 50 more at a time
+    @State private var refreshTrigger = UUID() // Force refresh when sync completes
     
     var body: some View {
         NavigationStack {
@@ -30,9 +48,9 @@ struct ExpenseListView: View {
                 .navigationTitle("Expenses")
             } else {
                 List {
-                    ForEach(filteredGroupedExpenses.keys.sorted(by: >), id: \.self) { date in
+                    ForEach(Array(paginatedGroupedExpenses.keys.sorted(by: >).enumerated()), id: \.element) { index, date in
                         Section(header: Text(date.formatted(date: .complete, time: .omitted))) {
-                            ForEach(filteredGroupedExpenses[date] ?? []) { expense in
+                            ForEach(paginatedGroupedExpenses[date] ?? []) { expense in
                                 ExpenseRow(expense: expense)
                                     .accessibleExpense(
                                         amount: expense.amount,
@@ -43,16 +61,53 @@ struct ExpenseListView: View {
                             }
                             .onDelete { indexSet in
                                 if let firstIndex = indexSet.first,
-                                   let expensesForDate = filteredGroupedExpenses[date],
+                                   let expensesForDate = paginatedGroupedExpenses[date],
                                    firstIndex < expensesForDate.count {
                                     expenseToDelete = expensesForDate[firstIndex]
                                     showingDeleteConfirmation = true
                                 }
                             }
+                            
+                            // Show "Load More" button at the last section if there are more expenses
+                            if index == paginatedGroupedExpenses.keys.sorted(by: >).count - 1 && hasMoreExpenses {
+                                Button {
+                                    loadMoreExpenses()
+                                } label: {
+                                    HStack {
+                                        Spacer()
+                                        Text("Load More Expenses (\(remainingExpenseCount) remaining)")
+                                            .font(.subheadline)
+                                            .foregroundColor(.accentColor)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 8)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
                 .searchable(text: $searchText, prompt: "Search expenses...")
+                .onChange(of: searchText) { _, _ in
+                    // Reset pagination when search changes
+                    displayedExpenseCount = paginationBatchSize
+                }
+                .onChange(of: selectedCategory?.id) { _, _ in
+                    // Reset pagination when category filter changes
+                    displayedExpenseCount = paginationBatchSize
+                }
+                .onChange(of: isFilteringByDate) { _, _ in
+                    // Reset pagination when date filter changes
+                    displayedExpenseCount = paginationBatchSize
+                }
+                .onChange(of: minAmount) { _, _ in
+                    // Reset pagination when amount filter changes
+                    displayedExpenseCount = paginationBatchSize
+                }
+                .onChange(of: maxAmount) { _, _ in
+                    // Reset pagination when amount filter changes
+                    displayedExpenseCount = paginationBatchSize
+                }
                 .navigationTitle("Expenses")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -99,6 +154,32 @@ struct ExpenseListView: View {
                         Text("Are you sure you want to delete this expense of \(expense.amount.formattedAsCurrency())?")
                     }
                 }
+                .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("CloudKitSyncCompleted"))) { _ in
+                    // Force query refresh by incrementing queryVersion
+                    // This makes the computed properties re-fetch data
+                    modelContext.processPendingChanges()
+                    queryVersion += 1
+                    refreshTrigger = UUID()
+                    
+                    // Process again after delays to catch any delayed CloudKit changes
+                    Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                        await MainActor.run {
+                            modelContext.processPendingChanges()
+                            queryVersion += 1 // Force query re-evaluation
+                            refreshTrigger = UUID()
+                        }
+                        
+                        // One more time after another delay
+                        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                        await MainActor.run {
+                            modelContext.processPendingChanges()
+                            queryVersion += 1 // Force query re-evaluation
+                            refreshTrigger = UUID()
+                        }
+                    }
+                }
+                .id(refreshTrigger) // Force refresh when trigger changes
             }
         }
     }
@@ -144,9 +225,41 @@ struct ExpenseListView: View {
         }
     }
     
+    // Paginated expenses - only show up to displayedExpenseCount
+    private var paginatedExpenses: [Expense] {
+        Array(filteredExpenses.prefix(displayedExpenseCount))
+    }
+    
+    // Paginated grouped expenses
+    private var paginatedGroupedExpenses: [Date: [Expense]] {
+        Dictionary(grouping: paginatedExpenses) { expense in
+            Calendar.current.startOfDay(for: expense.date)
+        }
+    }
+    
+    // Check if there are more expenses to load
+    private var hasMoreExpenses: Bool {
+        filteredExpenses.count > displayedExpenseCount
+    }
+    
+    // Calculate remaining expense count (cached to avoid repeated computation)
+    private var remainingExpenseCount: Int {
+        max(0, filteredExpenses.count - displayedExpenseCount)
+    }
+    
     private var groupedExpenses: [Date: [Expense]] {
         Dictionary(grouping: expenses) { expense in
             Calendar.current.startOfDay(for: expense.date)
+        }
+    }
+    
+    // Load more expenses (increase displayed count)
+    private func loadMoreExpenses() {
+        let totalCount = filteredExpenses.count
+        let newCount = min(displayedExpenseCount + paginationBatchSize, totalCount)
+        
+        withAnimation {
+            displayedExpenseCount = newCount
         }
     }
     
@@ -157,6 +270,8 @@ struct ExpenseListView: View {
         startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
         endDate = Date()
         isFilteringByDate = false
+        // Reset pagination when filters are cleared
+        displayedExpenseCount = paginationBatchSize
     }
     
     private func deleteExpense(_ expense: Expense) {

@@ -2,9 +2,9 @@ import Foundation
 import SwiftData
 
 @Model final class Expense {
-    @Attribute(.unique) var id: String
-    var amount: Double
-    var date: Date
+    var id: String = UUID().uuidString
+    var amount: Double = 0
+    var date: Date = Date()
     var notes: String?
     
     var category: Category?

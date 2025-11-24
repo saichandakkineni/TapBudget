@@ -2,14 +2,22 @@ import Foundation
 import SwiftData
 
 @Model final class Category {
-    @Attribute(.unique) var id: String
-    var name: String
-    var icon: String
-    var budget: Double
-    var color: String
+    var id: String = UUID().uuidString
+    var name: String = ""
+    var icon: String = "tag"
+    var budget: Double = 0
+    var color: String = "#FF0000"
     
     @Relationship(deleteRule: .cascade, inverse: \Expense.category)
     var expenses: [Expense]?
+    
+    var recurringExpenses: [RecurringExpense]?
+    
+    var expenseTemplates: [ExpenseTemplate]?
+    
+    var budgetPeriods: [BudgetPeriod]?
+    
+    var sharedBudgets: [SharedBudget]?
     
     init(name: String, icon: String, budget: Double = 0, color: String = "#FF0000") {
         self.id = UUID().uuidString
@@ -18,5 +26,9 @@ import SwiftData
         self.budget = budget
         self.color = color
         self.expenses = []
+        self.recurringExpenses = []
+        self.expenseTemplates = []
+        self.budgetPeriods = []
+        self.sharedBudgets = []
     }
 } 

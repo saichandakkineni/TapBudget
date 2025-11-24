@@ -2,15 +2,11 @@ import Foundation
 
 /// Extension providing currency formatting utilities for Double values
 extension Double {
-    /// Formats the double value as currency with default $ symbol
+    /// Formats the double value as currency with selected currency from CurrencyManager
     /// - Returns: A formatted string with currency symbol and proper decimal formatting
-    /// - Example: 100.5.formattedAsCurrency() returns "$100.50"
+    /// - Example: 100.5.formattedAsCurrency() returns "$100.50" (or selected currency)
     func formattedAsCurrency() -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 2
-        formatter.maximumFractionDigits = 2
-        return "$\(formatter.string(from: NSNumber(value: self)) ?? String(format: "%.2f", self))"
+        return CurrencyManager.shared.formatAmount(self)
     }
     
     /// Formats the double value as currency with a custom symbol

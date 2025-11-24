@@ -64,9 +64,11 @@ struct DateFilterHelper {
     }
     
     /// Returns date range for today
-    static func todayRange() -> (start: Date, end: Date) {
+    static func todayRange() -> (start: Date, end: Date)? {
         let start = startOfDay(for: Date())
-        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return nil
+        }
         return (start, end)
     }
 }

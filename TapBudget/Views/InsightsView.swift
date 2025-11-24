@@ -5,11 +5,21 @@ import Charts
 struct InsightsView: View {
     @Query private var expenses: [Expense]
     @Query private var categories: [Category]
+    @State private var selectedTimeRange: TimeRange = .sixMonths
+    
+    enum TimeRange: String, CaseIterable {
+        case threeMonths = "3 Months"
+        case sixMonths = "6 Months"
+        case oneYear = "1 Year"
+    }
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    // Advanced Analytics Summary
+                    AdvancedAnalyticsCard(expenses: expenses, categories: categories, timeRange: selectedTimeRange)
+                    
                     // Monthly spending chart
                     ChartCard(title: "Monthly Spending") {
                         Chart(monthlySpending) { spending in
@@ -34,7 +44,7 @@ struct InsightsView: View {
                                 innerRadius: .ratio(AppConstants.pieChartInnerRadius),
                                 angularInset: AppConstants.pieChartAngularInset
                             )
-                            .foregroundStyle(Color(hex: spending.category.color ?? "#FF0000"))
+                            .foregroundStyle(Color(hex: spending.category.color))
                         }
                     }
                     
@@ -58,14 +68,34 @@ struct InsightsView: View {
                 .padding()
             }
             .navigationTitle("Insights")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Picker("Time Range", selection: $selectedTimeRange) {
+                        ForEach(TimeRange.allCases, id: \.self) { range in
+                            Text(range.rawValue).tag(range)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
         }
     }
     
     private var monthlySpending: [MonthlySpending] {
-        // Calculate monthly totals for the last N months
+        // Calculate monthly totals based on selected time range
         let calendar = Calendar.current
         let endDate = Date()
-        let monthsToShow = AppConstants.monthlySpendingMonthsToShow
+        let monthsToShow: Int
+        
+        switch selectedTimeRange {
+        case .threeMonths:
+            monthsToShow = 3
+        case .sixMonths:
+            monthsToShow = 6
+        case .oneYear:
+            monthsToShow = 12
+        }
+        
         guard let startDate = calendar.date(byAdding: .month, value: -(monthsToShow - 1), to: endDate) else {
             return []
         }
@@ -90,7 +120,16 @@ struct InsightsView: View {
     
     private var categorySpending: [CategorySpending] {
         // Optimize by grouping expenses by category first
-        let expensesByCategory = Dictionary(grouping: expenses) { $0.category?.id ?? "" }
+        // Filter expenses to current month only for better performance
+        guard let monthRange = DateFilterHelper.currentMonthRange() else {
+            return []
+        }
+        
+        let currentMonthExpenses = expenses.filter { expense in
+            expense.date >= monthRange.start && expense.date < monthRange.end
+        }
+        
+        let expensesByCategory = Dictionary(grouping: currentMonthExpenses) { $0.category?.id ?? "" }
         
         return categories.map { category in
             let categoryExpenses = expensesByCategory[category.id] ?? []
@@ -107,15 +146,19 @@ struct ChartCard<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading) {
             Text(title)
-                .font(.headline)
+                .font(DynamicTypeHelper.headlineFont)
             
             content()
                 .frame(height: AppConstants.chartHeight)
         }
         .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(AppConstants.cardCornerRadius)
-        .shadow(radius: AppConstants.cardShadowRadius)
+        .background {
+            RoundedRectangle(cornerRadius: AppConstants.cardCornerRadius)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.1), radius: AppConstants.cardShadowRadius, x: 0, y: 2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
     }
 }
 
@@ -143,9 +186,9 @@ struct BudgetProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: category.icon ?? "questionmark.circle")
-                    .foregroundColor(Color(hex: category.color ?? "#FF0000"))
-                Text(category.name ?? "Unnamed Category")
+                Image(systemName: category.icon)
+                    .foregroundColor(Color(hex: category.color))
+                Text(category.name)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(totalSpent.formattedAsCurrency())
@@ -160,7 +203,7 @@ struct BudgetProgressView: View {
             
             if category.budget > 0 {
                 ProgressView(value: progress)
-                    .tint(Color(hex: category.color ?? "#FF0000"))
+                    .tint(Color(hex: category.color))
                 
                 HStack {
                     Text("Remaining: \(remainingBudget.formattedAsCurrency())")
@@ -180,9 +223,14 @@ struct BudgetProgressView: View {
             }
         }
         .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(AppConstants.cardCornerRadius)
-        .shadow(radius: AppConstants.cardShadowRadius)
+        .background {
+            RoundedRectangle(cornerRadius: AppConstants.cardCornerRadius)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.1), radius: AppConstants.cardShadowRadius, x: 0, y: 2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(AccessibilityHelper.categoryLabel(name: category.name, budget: category.budget, spent: totalSpent))
+        .accessibilityValue(AccessibilityHelper.progressValue(current: totalSpent, total: category.budget))
     }
 }
 

@@ -28,26 +28,53 @@ struct MonthlySummaryCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("This Month")
-                    .font(.headline)
+                    .font(DynamicTypeHelper.headlineFont)
                 Spacer()
                 Text(Date(), format: .dateTime.month(.wide))
-                    .font(.subheadline)
+                    .font(DynamicTypeHelper.captionFont)
                     .foregroundColor(.secondary)
             }
             
             Text(monthlyTotal.formattedAsCurrency())
-                .font(.system(size: 36, weight: .bold))
+                .font(DynamicTypeHelper.amountFont())
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
             
             HStack {
                 Label("\(expenseCount) expense\(expenseCount == 1 ? "" : "s")", systemImage: "list.bullet")
-                    .font(.caption)
+                    .font(DynamicTypeHelper.captionFont)
                     .foregroundColor(.secondary)
                 Spacer()
             }
         }
         .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(AppConstants.cardCornerRadius)
-        .shadow(radius: AppConstants.cardShadowRadius)
+        .background {
+            RoundedRectangle(cornerRadius: AppConstants.cardCornerRadius)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.1), radius: AppConstants.cardShadowRadius, x: 0, y: 2)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Monthly summary, \(monthlyTotal.formattedAsCurrency()), \(expenseCount) expense\(expenseCount == 1 ? "" : "s")")
+        .onChange(of: expenses.count) { _, _ in
+            // Update widget data when expenses change (non-blocking)
+            // Use Task to avoid blocking main thread
+            Task { @MainActor in
+                WidgetDataManager.shared.updateMonthlySummary(
+                    monthlyTotal: monthlyTotal,
+                    expenseCount: expenseCount
+                )
+            }
+        }
+        .task {
+            // Update widget data on appear (non-blocking, delayed)
+            // Small delay ensures view is fully rendered before updating widget
+            try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            await MainActor.run {
+                WidgetDataManager.shared.updateMonthlySummary(
+                    monthlyTotal: monthlyTotal,
+                    expenseCount: expenseCount
+                )
+            }
+        }
     }
-} 
+}

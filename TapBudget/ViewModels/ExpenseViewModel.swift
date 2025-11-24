@@ -38,50 +38,10 @@ import SwiftData
         
         do {
             try modelContext.save()
-            checkBudgetLimit(for: category)
+            // Budget alerts are now handled by BudgetAlertManager when expenses are added
+            // This ensures alerts respect the user's toggle setting
         } catch {
             throw ExpenseError.saveFailed(error.localizedDescription)
-        }
-    }
-    
-    /// Checks if the category has reached budget threshold and sends notification if needed
-    /// This method calculates the total spent for the current month and sends a notification
-    /// if the spending reaches 90% of the budget limit
-    /// - Parameter category: The category to check budget limits for
-    private func checkBudgetLimit(for category: Category) {
-        guard let monthRange = DateFilterHelper.currentMonthRange() else {
-            print("Error: Could not calculate current month range")
-            return
-        }
-        
-        // Extract tuple values to use in predicate (SwiftData predicates can't access tuple members directly)
-        let startOfMonth = monthRange.start
-        let endOfMonth = monthRange.end
-        
-        // Create a simple predicate for the date range
-        let descriptor = FetchDescriptor<Expense>(
-            predicate: #Predicate<Expense> { expense in
-                expense.date >= startOfMonth &&
-                expense.date < endOfMonth
-            }
-        )
-        
-        do {
-            // Fetch all expenses in the date range and filter by category in memory
-            let expenses = try modelContext.fetch(descriptor)
-            let categoryExpenses = expenses.filter { $0.category?.id == category.id }
-            let totalSpent = categoryExpenses.reduce(0) { $0 + $1.amount }
-            
-            // Check if budget threshold is reached
-            if category.budget > 0 && totalSpent >= category.budget * AppConstants.budgetAlertThreshold {
-                let percentage = totalSpent / category.budget
-                NotificationManager.shared.sendBudgetAlert(
-                    categoryName: category.name,
-                    budgetPercentage: percentage
-                )
-            }
-        } catch {
-            print("Error fetching expenses for budget check: \(error.localizedDescription)")
         }
     }
 }
@@ -90,6 +50,7 @@ import SwiftData
 enum ExpenseError: LocalizedError {
     case invalidAmount
     case invalidCategory
+    case invalidDate
     case validationFailed(String)
     case saveFailed(String)
     
@@ -99,6 +60,8 @@ enum ExpenseError: LocalizedError {
             return "Please enter a valid amount greater than zero"
         case .invalidCategory:
             return "Please select a valid category"
+        case .invalidDate:
+            return "Please select a valid date"
         case .validationFailed(let message):
             return message
         case .saveFailed(let message):
